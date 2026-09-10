@@ -1,1 +1,128 @@
+name: build-free
 
+on:
+  workflow_dispatch:
+    inputs:
+      luci_version:
+        description: "选择luci版本"
+        required: false
+        default: "25.12.2"
+        type: choice
+        options:
+          - "25.12.2"
+          - "25.12.1"
+      custom_router_ip:
+        description: "设置路由器管理地址"
+        required: true
+        default: "192.168.0.31"
+      profile:
+        description: "固件大小 (MB)"
+        required: true
+        default: "2048"
+      include_docker:
+        description: "是否编译 Docker 插件"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      enable_pppoe:
+        description: "是否配置PPPoE拨号"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      pppoe_account:
+        description: "宽带账号"
+        required: false
+        default: ""
+      pppoe_password:
+        description: "宽带密码"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set executable permissions
+        run: |
+          if [ -f "${{ github.workspace }}/x86-64/build25.sh" ]; then
+            chmod +x ${{ github.workspace }}/x86-64/build25.sh
+          fi
+
+      - name: Save Custom Router IP
+        run: |
+          mkdir -p "${{ github.workspace }}/custom"
+          echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
+            zlib1g-dev gawk git gettext libssl-dev xsltproc rsync u-boot-tools zstd wget
+
+      - name: Download and Extract ImmortalWrt ImageBuilder
+        run: |
+          luci_version="${{ github.event.inputs.luci_version }}"
+          IB_URL="https://downloads.immortalwrt.org/releases/${luci_version}/targets/x86/64/immortalwrt-imagebuilder-${luci_version}-x86-64.Linux-x86_64.tar.zst"
+          
+          echo "Downloading ImageBuilder from: ${IB_URL}"
+          wget -q --show-progress "${IB_URL}" -O imagebuilder.tar.zst
+          
+          mkdir -p /tmp/immortalwrt
+          tar -I zstd -xf imagebuilder.tar.zst -C /tmp/immortalwrt --strip-components=1
+          echo "IMAGEBUILDER_DIR=/tmp/immortalwrt" >> $GITHUB_ENV
+
+      - name: Build ImmortalWrt Firmware
+        run: |
+          cd $IMAGEBUILDER_DIR
+          
+          mkdir -p bin files files/etc/config
+          [ -d "${{ github.workspace }}/files" ] && cp -rf ${{ github.workspace }}/files/* files/ 2>/dev/null || true
+          [ -d "${{ github.workspace }}/custom" ] && cp -rf ${{ github.workspace }}/custom/* files/etc/config/ 2>/dev/null || true
+          [ -f "${{ github.workspace }}/x86-64/imm25.config" ] && cp -f ${{ github.workspace }}/x86-64/imm25.config .config
+          
+          export PROFILE="${{ github.event.inputs.profile }}"
+          export INCLUDE_DOCKER="${{ github.event.inputs.include_docker }}"
+          
+          if [ -f "${{ github.workspace }}/x86-64/build25.sh" ]; then
+            bash ${{ github.workspace }}/x86-64/build25.sh
+          else
+            make image
+          fi
+          
+          mkdir -p ${{ github.workspace }}/bin/targets/x86/64
+          [ -d "bin/targets/x86/64" ] && cp -rf bin/targets/x86/64/* ${{ github.workspace }}/bin/targets/x86/64/ 2>/dev/null || true
+
+      - name: Create Release Info
+        run: |
+          cat > ${{ github.workspace }}/router-info.md <<EOF
+          ## 📡 路由器后台信息
+          <a href="https://wkdaily.cpolar.cn/archives/1">
+           <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
+          </a>
+          
+          - 🏠 **后台地址**: ${{ github.event.inputs.custom_router_ip }}
+          - 👤 **用户名**: root
+          - 🔑 **密码**: 无
+          EOF
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: Laohu-x86-64-free-${{ github.event.inputs.luci_version }}-${{ github.run_number }}
+          body_path: ${{ github.workspace }}/router-info.md
+          files: ${{ github.workspace }}/bin/targets/x86/64/*combined-efi.img.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
