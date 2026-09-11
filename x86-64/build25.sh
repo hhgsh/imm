@@ -5,18 +5,18 @@ echo "Starting 99-custom.sh at $(date)" >> $LOGFILE
 echo "编译固件大小为: $PROFILE MB"
 echo "Include Docker: $INCLUDE_DOCKER"
 
-echo "Create pppoe-settings"
-mkdir -p /home/build/immortalwrt/files/etc/config
+# 使用相对路径，指向当前工作目录下的 files
+mkdir -p files/etc/config
 
 # 创建pppoe配置文件 yml传入环境变量ENABLE_PPPOE等 写入配置文件 供99-custom.sh读取
-cat << EOF > /home/build/immortalwrt/files/etc/config/pppoe-settings
+cat << EOF > files/etc/config/pppoe-settings
 enable_pppoe=${ENABLE_PPPOE}
 pppoe_account=${PPPOE_ACCOUNT}
 pppoe_password=${PPPOE_PASSWORD}
 EOF
 
 echo "cat pppoe-settings"
-cat /home/build/immortalwrt/files/etc/config/pppoe-settings
+cat files/etc/config/pppoe-settings
 
 # ============= 1. 定义与合并所有需要安装的包列表 =============
 PACKAGES=""
@@ -25,7 +25,7 @@ PACKAGES="$PACKAGES luci-i18n-diskman-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
 PACKAGES="$PACKAGES luci-theme-argon"
 PACKAGES="$PACKAGES luci-app-argon-config"
-PACKAGES="$PACKAGES luci-i18n-argon-config-zh-cn" #25.12
+PACKAGES="$PACKAGES luci-i18n-argon-config-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 PACKAGES="$PACKAGES openssh-sftp-server"
@@ -46,13 +46,12 @@ fi
 
 # ============= 2. 检测官方源缺少哪些包，按需从第三方源补充 =============
 STORE_REPO="/tmp/store-apk-repo"
-OFFICIAL_PKG_DIR="/home/build/immortalwrt/bin/packages"
+OFFICIAL_PKG_DIR="packages"
 MISSING_PACKAGES=""
 
 # 检查当前 PACKAGES 中有哪些在官方仓库中找不到
 for pkg in $PACKAGES; do
-    # 如果在官方软件仓库目录下找不到对应的 package 文件，标记为缺失
-    if ! find "$OFFICIAL_PKG_DIR" -name "${pkg}*.apk" -o -name "${pkg}*.ipk" 2>/dev/null | grep -q .; then
+    if ! find bin/packages packages -name "${pkg}*.apk" -o -name "${pkg}*.ipk" 2>/dev/null | grep -q .; then
         MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
     fi
 done
@@ -63,14 +62,14 @@ if [ -n "$MISSING_PACKAGES" ]; then
     
     git clone --depth=1 https://github.com/wukongdaily/apk.git "$STORE_REPO"
 
-    mkdir -p /home/build/immortalwrt/extra-packages
+    mkdir -p extra-packages
     COPIED_ANY=false
 
     # 从第三方仓库匹配并拷贝官方缺失的包
     for pkg in $MISSING_PACKAGES; do
         if ls "$STORE_REPO"/run/x86/${pkg}* >/dev/null 2>&1; then
             echo "📦 从第三方源提取: $pkg"
-            cp -r "$STORE_REPO"/run/x86/${pkg}* /home/build/immortalwrt/extra-packages/
+            cp -r "$STORE_REPO"/run/x86/${pkg}* extra-packages/
             COPIED_ANY=true
         else
             echo "❌ 第三方源中也未找到该包: $pkg"
@@ -80,8 +79,13 @@ if [ -n "$MISSING_PACKAGES" ]; then
     # 如果有成功拷贝的第三方包，执行准备与解压操作
     if [ "$COPIED_ANY" = true ]; then
         echo "✅ 开始准备解压第三方软件包..."
-        sh shell/apk-prepare-packages.sh
-        ls -lah /home/build/immortalwrt/packages/
+        if [ -f "shell/apk-prepare-packages.sh" ]; then
+            sh shell/apk-prepare-packages.sh
+        else
+            mkdir -p packages
+            cp -r extra-packages/* packages/ 2>/dev/null || true
+        fi
+        ls -lah packages/ 2>/dev/null || true
     fi
 
     # 清理临时代码库
@@ -91,7 +95,6 @@ else
 fi
 
 # ============= 3. 特殊组件处理（OpenClash / SSR Plus 内核下载） =============
-# 若构建 openclash 则添加内核
 if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     echo "✅ 已选择 luci-app-openclash，添加 openclash core"
     mkdir -p files/etc/openclash/core
@@ -108,7 +111,8 @@ if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
         | head -n1 \
         | cut -d '"' -f 4)
     echo "OpenClash latest apk: $URL"
-    wget "$URL" -P /home/build/immortalwrt/packages/
+    mkdir -p packages/
+    wget "$URL" -P packages/
 else
     echo "⚪️ 未选择 luci-app-openclash"
 fi
@@ -130,7 +134,8 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - 开始构建固件..."
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
 
-make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$PROFILE
+# FILES 调整为当前运行目录下的 files 文件夹
+make image PROFILE="generic" PACKAGES="$PACKAGES" FILES="$(pwd)/files" ROOTFS_PARTSIZE=$PROFILE
 
 if [ $? -ne 0 ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
