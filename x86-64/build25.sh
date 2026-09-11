@@ -46,7 +46,7 @@ if [ -f "shell/apk-custom-packages.sh" ]; then
     if [ -n "$CUSTOM_PACKAGES" ]; then
         STORE_REPO="/tmp/store-apk-repo"
         echo "🔄 正在克隆第三方软件仓库 [wukongdaily/apk]..."
-        git clone --depth=1 https://github.com/wukongdaily/apk.git "$STORE_REPO"
+        git clone --depth=1 https://github.com/hhgsh/apk.git /tmp/store-apk-repo
 
         # 确保创建 ImageBuilder 认定的 packages 目录
         mkdir -p packages
