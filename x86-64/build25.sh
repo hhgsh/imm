@@ -1,7 +1,9 @@
 #!/bin/bash
 # 日志记录
+source shell/apk-custom-packages.sh
+echo "第三方apk软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/uci-defaults-log.txt"
-echo "Starting build script at $(date)" >> $LOGFILE
+echo "Starting 99-custom.sh at $(date)" >> $LOGFILE
 echo "编译固件大小为: $PROFILE MB"
 echo "Include Docker: $INCLUDE_DOCKER"
 
