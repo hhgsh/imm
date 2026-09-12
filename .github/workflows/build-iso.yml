@@ -1,0 +1,173 @@
+name: build-iso
+
+on:
+  workflow_dispatch:
+    inputs:
+      luci_version:
+        description: "选择luci版本"
+        required: false
+        default: "25.12.2"
+        type: choice
+        options:
+          - "25.12.2"
+          - "25.12.1"
+      custom_router_ip:
+        description: "设置路由器管理地址"
+        required: true
+        default: "192.168.0.31"
+      profile:
+        description: "固件大小 (MB)"
+        required: true
+        default: "2048"
+      include_docker:
+        description: "是否编译 Docker 插件"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      enable_pppoe:
+        description: "是否配置PPPoE拨号"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      pppoe_account:
+        description: "宽带账号"
+        required: false
+        default: ""
+      pppoe_password:
+        description: "宽带密码"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set executable permissions
+        run: |
+          if [ -f "${{ github.workspace }}/x86-64/build25.sh" ]; then
+            chmod +x ${{ github.workspace }}/x86-64/build25.sh
+          fi
+
+      - name: Save Custom Router IP
+        run: |
+          mkdir -p "${{ github.workspace }}/custom"
+          echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
+            zlib1g-dev gawk git gettext libssl-dev xsltproc rsync u-boot-tools zstd wget
+
+      - name: Download and Extract ImmortalWrt ImageBuilder
+        run: |
+          luci_version="${{ github.event.inputs.luci_version }}"
+          IB_URL="https://downloads.immortalwrt.org/releases/${luci_version}/targets/x86/64/immortalwrt-imagebuilder-${luci_version}-x86-64.Linux-x86_64.tar.zst"
+          
+          echo "Downloading ImageBuilder from: ${IB_URL}"
+          wget -q --show-progress "${IB_URL}" -O imagebuilder.tar.zst
+          
+          mkdir -p /tmp/immortalwrt
+          tar -I zstd -xf imagebuilder.tar.zst -C /tmp/immortalwrt --strip-components=1
+          echo "IMAGEBUILDER_DIR=/tmp/immortalwrt" >> $GITHUB_ENV
+
+      - name: Build ImmortalWrt Firmware
+        run: |
+          cd $IMAGEBUILDER_DIR
+          mkdir -p bin files files/etc/config packages extra-packages
+
+          # 1. 克隆第三方 apk 插件仓库 (hhgsh/apk) 到临时目录
+          echo "Cloning third-party apk repository..."
+          git clone --depth=1 https://github.com/hhgsh/apk.git /tmp/store-apk-repo
+
+          # 2. 将 x86 架构下的 .run 插件包复制到 extra-packages 目录，供 shell/apk-prepare-packages.sh 解压处理
+          if [ -d "/tmp/store-apk-repo/run/x86" ]; then
+            cp -rf /tmp/store-apk-repo/run/x86/* extra-packages/ 2>/dev/null || true
+            echo "✅ Third-party run files prepared in extra-packages."
+          fi
+
+          # 3. 如果项目根目录下已有准备好的 packages 或 extra-packages，进行合并
+          [ -d "${{ github.workspace }}/packages" ] && cp -rf ${{ github.workspace }}/packages/* packages/ 2>/dev/null || true
+          [ -d "${{ github.workspace }}/extra-packages" ] && cp -rf ${{ github.workspace }}/extra-packages/* extra-packages/ 2>/dev/null || true
+
+          # 4. 复制本地项目中的 shell、files 目录与配置文件
+          [ -d "${{ github.workspace }}/shell" ] && cp -rf ${{ github.workspace }}/shell ./ 2>/dev/null || true
+          [ -d "${{ github.workspace }}/files" ] && cp -rf ${{ github.workspace }}/files/* files/ 2>/dev/null || true
+          [ -d "${{ github.workspace }}/custom" ] && cp -rf ${{ github.workspace }}/custom/* files/etc/config/ 2>/dev/null || true
+          [ -f "${{ github.workspace }}/x86-64/imm25.config" ] && cp -f ${{ github.workspace }}/x86-64/imm25.config .config
+
+          # 5. 导出环境变量并运行编译脚本
+          export PROFILE="${{ github.event.inputs.profile }}"
+          export INCLUDE_DOCKER="${{ github.event.inputs.include_docker }}"
+          export ENABLE_PPPOE="${{ github.event.inputs.enable_pppoe }}"
+          export PPPOE_ACCOUNT="${{ github.event.inputs.pppoe_account }}"
+          export PPPOE_PASSWORD="${{ github.event.inputs.pppoe_password }}"
+
+          if [ -f "${{ github.workspace }}/x86-64/build25.sh" ]; then
+            bash ${{ github.workspace }}/x86-64/build25.sh
+          else
+            make image
+          fi
+
+          # 6. 收集生成的固件文件
+          mkdir -p ${{ github.workspace }}/bin/targets/x86/64
+          [ -d "bin/targets/x86/64" ] && cp -rf bin/targets/x86/64/* ${{ github.workspace }}/bin/targets/x86/64/ 2>/dev/null || true
+     
+      - name: ✅ 复制固件到根目录
+        run: |
+          cp ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz ${{ github.workspace }}
+
+      - name: ✅ 上传固件到 artifact (for ISO generation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-img
+          path: |
+            *.img.gz
+
+  build_installer_iso:
+    runs-on: ubuntu-22.04
+    needs: build_immortalwrt
+
+    steps:
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-img
+
+      - name: ⏬ 同步 img-installer 项目 准备制作ISO
+        run: |
+          git clone https://github.com/wukongdaily/img-installer.git
+          cd img-installer
+
+      - name: Set executable permissions for scripts
+        run: |
+          chmod +x "${{ github.workspace }}/img-installer/custom.sh"
+          chmod +x "${{ github.workspace }}/img-installer/supportFiles/custom/build.sh"
+
+      - name: ✅ 制作 25.12.x ISO
+        run: |
+          firmware_file=$(ls *squashfs-combined-efi.img.gz)
+          cd img-installer
+          bash autobuild/autobuild.sh "../$firmware_file"
+
+      - name: 🚀 上传 ISO 到 Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "Custom-Installer-x86_64-ISO"
+          body_path: "${{ github.workspace }}/img-installer/autobuild/info.md"
+          files: |
+            img-installer/output/custom-installer-x86_64.iso
+          token: "${{ secrets.GITHUB_TOKEN }}"
