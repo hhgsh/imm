@@ -1,4 +1,4 @@
-name: build iso
+name: build-imm-iso
 
 on:
   workflow_dispatch:
