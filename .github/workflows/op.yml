@@ -72,7 +72,7 @@ jobs:
           sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
             zlib1g-dev gawk git gettext libssl-dev xsltproc rsync u-boot-tools zstd wget
 
-      - name: Download and Extract ImmortalWrt ImageBuilder
+      - name: Download and Extract OpenWrt ImageBuilder
         run: |
           luci_version="${{ github.event.inputs.luci_version }}"
           IB_URL="https://downloads.openwrt.org/releases/${luci_version}/targets/x86/64/openwrt-imagebuilder-${luci_version}-x86-64.Linux-x86_64.tar.zst"
