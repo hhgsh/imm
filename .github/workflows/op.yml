@@ -83,6 +83,42 @@ jobs:
           mkdir -p /tmp/openwrt
           tar -I zstd -xf imagebuilder.tar.zst -C /tmp/openwrt --strip-components=1
           echo "IMAGEBUILDER_DIR=/tmp/openwrt" >> $GITHUB_ENV
+      
+      - name: Add ImmortalWrt Repositories and Disable Signature Check
+        run: |
+          cd /tmp/openwrt
+          
+          # 1. 禁用签名强校验，防止混用第三方源时报 Signature check failed
+          sed -i 's/option check_signature/# option check_signature/g' repositories.conf
+          
+          # 2. 追加 ImmortalWrt 官方软件源 (x86_64 / 25.12.2)
+          IMM_VER="25.12.2"
+          ARCH="x86_64"
+          
+          echo "src/gz immortal_base https://downloads.immortalwrt.org/releases/${IMM_VER}/packages/${ARCH}/base" >> repositories.conf
+          echo "src/gz immortal_luci https://downloads.immortalwrt.org/releases/${IMM_VER}/packages/${ARCH}/luci" >> repositories.conf
+          echo "src/gz immortal_packages https://downloads.immortalwrt.org/releases/${IMM_VER}/packages/${ARCH}/packages" >> repositories.conf
+          echo "src/gz immortal_routing https://downloads.immortalwrt.org/releases/${IMM_VER}/packages/${ARCH}/routing" >> repositories.conf
+          
+          # 3. 打印 repositories.conf 以供检查确认
+          echo "=== Updated repositories.conf ==="
+          cat repositories.conf
+
+      - name: Build Firmware Image
+        run: |
+          cd /tmp/openwrt
+          
+          # 定义需要打包入固件的插件列表
+          PACKAGES=""
+          PACKAGES="$PACKAGES luci-theme-argon luci-app-argon-config luci-i18n-argon-config-zh-cn"
+          PACKAGES="$PACKAGES luci-app-diskman luci-i18n-diskman-zh-cn"
+          PACKAGES="$PACKAGES luci-app-zerotier luci-i18n-zerotier-zh-cn"
+          PACKAGES="$PACKAGES luci luci-i18n-base-zh-cn luci-i18n-opkg-zh-cn"
+          PACKAGES="$PACKAGES curl wget-ssl htop"
+
+          echo "Building image with packages: ${PACKAGES}"
+          
+          make image PROFILE="generic" PACKAGES="${PACKAGES}"
 
       - name: Build openwrt Firmware
         run: |
