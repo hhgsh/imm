@@ -1,4 +1,4 @@
-name: build-free
+name: build-op
 
 on:
   workflow_dispatch:
