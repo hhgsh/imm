@@ -89,26 +89,20 @@ jobs:
           cd $IMAGEBUILDER_DIR
           mkdir -p bin files files/etc/config packages extra-packages
 
-          # 1. 克隆第三方 apk 插件仓库 (hhgsh/apk) 到临时目录
+          # 1. 克隆第三方 apk 仓库
           echo "Cloning third-party apk repository..."
           git clone --depth=1 https://github.com/hhgsh/apk.git /tmp/store-apk-repo
 
-          # 2. 提取 .run 安装脚本文件到 extra-packages
+          # 2. 提取 .run 安装脚本文件
           if [ -d "/tmp/store-apk-repo/run/x86" ]; then
             cp -rf /tmp/store-apk-repo/run/x86/* extra-packages/ 2>/dev/null || true
           fi
 
-          # 3. 将第三方 apk 文件直接放入 ImageBuilder 的 packages 目录中
-          if [ -d "/tmp/store-apk-repo/x86_64" ]; then
-            cp -rf /tmp/store-apk-repo/x86_64/* packages/ 2>/dev/null || true
-          elif [ -d "/tmp/store-apk-repo/packages" ]; then
-            cp -rf /tmp/store-apk-repo/packages/* packages/ 2>/dev/null || true
-          else
-            cp -rf /tmp/store-apk-repo/*.apk packages/ 2>/dev/null || true
-          fi
+          # 3. 递归查找所有 .apk 文件并统一平铺移动到 ImageBuilder 的 packages 目录下
+          find /tmp/store-apk-repo -type f -name "*.apk" -exec cp -f {} packages/ \; 2>/dev/null || true
 
-          # 4. 合并工作区中的 packages 和 extra-packages
-          [ -d "${{ github.workspace }}/packages" ] && cp -rf ${{ github.workspace }}/packages/* packages/ 2>/dev/null || true
+          # 4. 合并工作区中已有的 packages 和 extra-packages
+          [ -d "${{ github.workspace }}/packages" ] && find ${{ github.workspace }}/packages -type f -name "*.apk" -exec cp -f {} packages/ \; 2>/dev/null || true
           [ -d "${{ github.workspace }}/extra-packages" ] && cp -rf ${{ github.workspace }}/extra-packages/* extra-packages/ 2>/dev/null || true
 
           # 5. 复制 shell、files 及配置文件
@@ -117,7 +111,7 @@ jobs:
           [ -d "${{ github.workspace }}/custom" ] && cp -rf ${{ github.workspace }}/custom/* files/etc/config/ 2>/dev/null || true
           [ -f "${{ github.workspace }}/x86-64/imm25.config" ] && cp -f ${{ github.workspace }}/x86-64/imm25.config .config
 
-          # 6. 导出环境变量并运行构建脚本
+          # 6. 导出环境变量并运行编译脚本
           export PROFILE="${{ github.event.inputs.profile }}"
           export INCLUDE_DOCKER="${{ github.event.inputs.include_docker }}"
           export ENABLE_PPPOE="${{ github.event.inputs.enable_pppoe }}"
@@ -130,9 +124,10 @@ jobs:
             make image
           fi
 
-          # 7. 收集生成的固件
+          # 7. 收集生成的固件文件
           mkdir -p ${{ github.workspace }}/bin/targets/x86/64
           [ -d "bin/targets/x86/64" ] && cp -rf bin/targets/x86/64/* ${{ github.workspace }}/bin/targets/x86/64/ 2>/dev/null || true
+          
       - name: Create Release Info
         run: |
           cat > ${{ github.workspace }}/router-info.md <<EOF
