@@ -1,4 +1,4 @@
-name: build-free
+name: build-imm
 
 on:
   workflow_dispatch:
