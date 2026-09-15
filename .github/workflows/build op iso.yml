@@ -167,7 +167,7 @@ jobs:
       - name: 🚀 上传 ISO 到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "Custom-Installer-x86_64-ISO-${{ github.run_number }}"
+          tag_name: "openwrt-Installer-x86_64-ISO-${{ github.run_number }}"
           body_path: "${{ github.workspace }}/img-installer/autobuild/info.md"
           files: |
             img-installer/output/custom-installer-x86_64.iso
