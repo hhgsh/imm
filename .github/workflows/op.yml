@@ -93,37 +93,31 @@ jobs:
           echo "Cloning third-party apk repository..."
           git clone --depth=1 https://github.com/hhgsh/apk.git /tmp/store-apk-repo
 
-          # 2. 将 x86 架构下的 .run 插件包复制到 extra-packages 目录
+          # 2. 提取 .run 安装脚本文件到 extra-packages
           if [ -d "/tmp/store-apk-repo/run/x86" ]; then
             cp -rf /tmp/store-apk-repo/run/x86/* extra-packages/ 2>/dev/null || true
-            echo "✅ Third-party run files prepared in extra-packages."
           fi
 
-          # 3. 将第三方 apk 仓库放置到本地 packages 目录中，供 ImageBuilder 读取
+          # 3. 将第三方 apk 文件直接放入 ImageBuilder 的 packages 目录中
           if [ -d "/tmp/store-apk-repo/x86_64" ]; then
             cp -rf /tmp/store-apk-repo/x86_64/* packages/ 2>/dev/null || true
           elif [ -d "/tmp/store-apk-repo/packages" ]; then
             cp -rf /tmp/store-apk-repo/packages/* packages/ 2>/dev/null || true
           else
-            cp -rf /tmp/store-apk-repo/* packages/ 2>/dev/null || true
+            cp -rf /tmp/store-apk-repo/*.apk packages/ 2>/dev/null || true
           fi
 
-          # 4. 合并项目根目录下的 packages 或 extra-packages
+          # 4. 合并工作区中的 packages 和 extra-packages
           [ -d "${{ github.workspace }}/packages" ] && cp -rf ${{ github.workspace }}/packages/* packages/ 2>/dev/null || true
           [ -d "${{ github.workspace }}/extra-packages" ] && cp -rf ${{ github.workspace }}/extra-packages/* extra-packages/ 2>/dev/null || true
 
-          # 5. 在 repositories 配置中添加本地 packages 目录作为自定义源
-          if [ -f "repositories" ]; then
-            echo "src/gz custom_local file://$IMAGEBUILDER_DIR/packages" >> repositories
-          fi
-
-          # 6. 复制本地项目中的 shell、files 目录与配置文件
+          # 5. 复制 shell、files 及配置文件
           [ -d "${{ github.workspace }}/shell" ] && cp -rf ${{ github.workspace }}/shell ./ 2>/dev/null || true
           [ -d "${{ github.workspace }}/files" ] && cp -rf ${{ github.workspace }}/files/* files/ 2>/dev/null || true
           [ -d "${{ github.workspace }}/custom" ] && cp -rf ${{ github.workspace }}/custom/* files/etc/config/ 2>/dev/null || true
           [ -f "${{ github.workspace }}/x86-64/imm25.config" ] && cp -f ${{ github.workspace }}/x86-64/imm25.config .config
 
-          # 7. 导出环境变量并运行编译脚本
+          # 6. 导出环境变量并运行构建脚本
           export PROFILE="${{ github.event.inputs.profile }}"
           export INCLUDE_DOCKER="${{ github.event.inputs.include_docker }}"
           export ENABLE_PPPOE="${{ github.event.inputs.enable_pppoe }}"
@@ -136,7 +130,7 @@ jobs:
             make image
           fi
 
-          # 8. 收集生成的固件文件
+          # 7. 收集生成的固件
           mkdir -p ${{ github.workspace }}/bin/targets/x86/64
           [ -d "bin/targets/x86/64" ] && cp -rf bin/targets/x86/64/* ${{ github.workspace }}/bin/targets/x86/64/ 2>/dev/null || true
       - name: Create Release Info
